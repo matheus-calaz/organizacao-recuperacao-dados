@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+
+# Arquivos de índice gerados pelos programas
+*.ind
+*.lst
+btree.dat
+
+# Arquivos temporários
+*_temp.dat
+games_temp.dat
+
+# Configurações de IDE
+.vscode/
+.idea/
+
+# Sistema operacional
+.DS_Store
+Thumbs.db

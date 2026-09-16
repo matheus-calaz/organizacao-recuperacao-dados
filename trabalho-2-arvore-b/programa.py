@@ -2,31 +2,30 @@ import sys
 import os
 import struct
 
-# CONFIGURAÇÕES GLOBAIS E CONSTANTES
-
-ORDEM = 5  # Ordem da Árvore-B (pode ser alterada livremente)
+# Configuração da Árvore-B e do layout binário das páginas.
+ORDEM = 5
 NULO = -1
-TAM_CAB = 4  # O cabeçalho armazena o RRN da raiz (inteiro de 4 bytes)
-
-# Definição do formato de empacotamento com struct para tamanho fixo em disco:
-# 'i' para numChaves, seguido de chaves, offsets e filhos
+TAM_CAB = 4
 FORMATO_PAGINA = f"=i{ORDEM-1}i{ORDEM-1}i{ORDEM}i"
 TAM_PAGINA = struct.calcsize(FORMATO_PAGINA)
 
-# ESTRUTURA DA PÁGINA (ÁRVORE-B)
+
 class Pagina:
+    """Representa uma página de tamanho fixo persistida em btree.dat."""
+
     def __init__(self) -> None:
         self.numChaves: int = 0
         self.chaves: list = [NULO] * (ORDEM - 1)
-        self.offsets: list = [NULO] * (ORDEM - 1)  # Byte-offsets do arquivo games.dat
-        self.filhos: list = [NULO] * ORDEM        # RRNs das páginas filhas
+        self.offsets: list = [NULO] * (ORDEM - 1)
+        self.filhos: list = [NULO] * ORDEM
 
-# FUNÇÕES DE GERENCIAMENTO DE DISCO (LEITURA E ESCRITA)
+
+# Persistência das páginas e do cabeçalho
+
 def lePagina(rrn: int) -> Pagina:
-    """Calcula o byte-offset da página a partir do RRN e a lê do disco."""
+    """Localiza uma página pelo RRN e a reconstrói a partir do arquivo binário."""
     if rrn == NULO:
         return None
-    
     offset_disco = TAM_CAB + rrn * TAM_PAGINA
     if not os.path.exists("btree.dat"):
         return None
@@ -35,33 +34,28 @@ def lePagina(rrn: int) -> Pagina:
         dados = arqBtree.read(TAM_PAGINA)
         if len(dados) < TAM_PAGINA:
             return None
-            
         unpacked = struct.unpack(FORMATO_PAGINA, dados)
-        
         pag = Pagina()
         pag.numChaves = unpacked[0]
-        
         idx = 1
         pag.chaves = list(unpacked[idx : idx + ORDEM - 1])
         idx += ORDEM - 1
         pag.offsets = list(unpacked[idx : idx + ORDEM - 1])
         idx += ORDEM - 1
         pag.filhos = list(unpacked[idx : idx + ORDEM])
-        
         return pag
 
+
 def escrevePagina(rrn: int, pag: Pagina) -> None:
-    """Calcula o byte-offset da página a partir do RRN e escreve no disco."""
+    """Serializa uma página na posição de disco determinada por seu RRN."""
     offset_disco = TAM_CAB + rrn * TAM_PAGINA
-    
-    # Prepara a lista de dados para empacotamento, garantindo que todos os campos estejam na ordem correta
     dados_para_empacotar = [pag.numChaves] + pag.chaves + pag.offsets + pag.filhos
     dados_dados = struct.pack(FORMATO_PAGINA, *dados_para_empacotar)
-    
     modo = "r+b" if os.path.exists("btree.dat") else "wb"
     with open("btree.dat", modo) as arqBtree:
         arqBtree.seek(offset_disco)
         arqBtree.write(dados_dados)
+
 
 def le_raiz_cabecalho() -> int:
     """Lê o RRN da raiz armazenado nos 4 bytes iniciais do arquivo."""
@@ -73,6 +67,7 @@ def le_raiz_cabecalho() -> int:
             return NULO
         return struct.unpack("=i", dados)[0]
 
+
 def atualiza_raiz_cabecalho(raiz_rrn: int) -> None:
     """Atualiza o RRN da raiz no cabeçalho do arquivo."""
     modo = "r+b" if os.path.exists("btree.dat") else "wb"
@@ -80,38 +75,39 @@ def atualiza_raiz_cabecalho(raiz_rrn: int) -> None:
         arqBtree.seek(0)
         arqBtree.write(struct.pack("=i", raiz_rrn))
 
+
 def novo_rrn() -> int:
-    """Retorna o próximo RRN disponível baseado no fim do arquivo."""
+    """Calcula o próximo RRN disponível com base no tamanho de btree.dat."""
     if not os.path.exists("btree.dat"):
         return 0
     tamanho_arquivo = os.path.getsize("btree.dat")
     return (tamanho_arquivo - TAM_CAB) // TAM_PAGINA
 
+
+# Busca e inserção na Árvore-B
+
 def buscaNaPagina(chave: int, pag: Pagina) -> tuple:
     """Busca linear dentro de uma página específica."""
     pos = 0
-
     while pos < pag.numChaves and chave > pag.chaves[pos]:
         pos += 1
-        
     if pos < pag.numChaves and chave == pag.chaves[pos]:
         return True, pos
     else:
         return False, pos
 
+
 def buscaNaArvore(chave: int, rrn: int) -> tuple:
-    """Busca recursiva navegando pelas páginas da Árvore-B."""
+    """Busca recursivamente a chave, seguindo o filho correspondente em cada página."""
     if rrn == NULO:
         return False, NULO, NULO
-        
     pag = lePagina(rrn)
     achou, pos = buscaNaPagina(chave, pag)
-    
     if achou:
         return True, rrn, pos
     else:
-        # Busca recursiva na página filha correspondente
         return buscaNaArvore(chave, pag.filhos[pos])
+
 
 def insereNaPagina(chave: int, pos_offset: int, filhoD: int, pag: Pagina) -> None:
     """Insere ordenadamente uma chave, seu offset e o filho direito na página."""
@@ -121,25 +117,21 @@ def insereNaPagina(chave: int, pos_offset: int, filhoD: int, pag: Pagina) -> Non
         pag.offsets[i] = pag.offsets[i - 1]
         pag.filhos[i + 1] = pag.filhos[i]
         i -= 1
-        
     pag.chaves[i] = chave
     pag.offsets[i] = pos_offset
     pag.filhos[i + 1] = filhoD
     pag.numChaves += 1
 
+
 def divide(chave: int, pos_offset: int, filhoD: int, pag: Pagina) -> tuple:
-    """Divide uma página transbordada (Overflow) criando uma nova irmã."""
-    # Criação de uma estrutura temporária expandida para comportar o overflow 
+    """Divide uma página em overflow e retorna a chave promovida ao nível superior."""
     class TempPag:
         def __init__(self):
             self.numChaves = pag.numChaves
             self.chaves = pag.chaves + [NULO]
             self.offsets = pag.offsets + [NULO]
             self.filhos = pag.filhos + [NULO]
-
     temp = TempPag()
-    
-    # Insere o elemento que estourou a capacidade na página temporária 
     i = temp.numChaves
     while i > 0 and chave < temp.chaves[i - 1]:
         temp.chaves[i] = temp.chaves[i - 1]
@@ -151,12 +143,11 @@ def divide(chave: int, pos_offset: int, filhoD: int, pag: Pagina) -> tuple:
     temp.filhos[i + 1] = filhoD
     temp.numChaves += 1
 
+    # O elemento central é promovido; os demais são distribuídos entre as páginas.
     meio = ORDEM // 2
     chavePro = temp.chaves[meio]
     offsetPro = temp.offsets[meio]
     filhoDpro = novo_rrn()
-
-    # Atualiza a página atual com os elementos anteriores ao meio 
     pAtual = Pagina()
     pAtual.numChaves = meio
     for idx in range(meio):
@@ -164,8 +155,6 @@ def divide(chave: int, pos_offset: int, filhoD: int, pag: Pagina) -> tuple:
         pAtual.offsets[idx] = temp.offsets[idx]
     for idx in range(meio + 1):
         pAtual.filhos[idx] = temp.filhos[idx]
-
-    # Distribui para a nova página irmã os elementos posteriores ao meio
     pNova = Pagina()
     pNova.numChaves = temp.numChaves - meio - 1
     for idx in range(pNova.numChaves):
@@ -173,37 +162,33 @@ def divide(chave: int, pos_offset: int, filhoD: int, pag: Pagina) -> tuple:
         pNova.offsets[idx] = temp.offsets[meio + 1 + idx]
     for idx in range(pNova.numChaves + 1):
         pNova.filhos[idx] = temp.filhos[meio + 1 + idx]
-
     return chavePro, offsetPro, filhoDpro, pAtual, pNova
 
+
 def insereNaArvore(chave: int, pos_offset: int, rrnAtual: int) -> tuple:
-    """Insere recursivamente um par {chave, offset} na subárvore."""
+    """Insere recursivamente o par (chave, offset) e propaga promoções."""
     if rrnAtual == NULO:
         return chave, pos_offset, NULO, True
-
     pag = lePagina(rrnAtual)
     achou, pos = buscaNaPagina(chave, pag)
     if achou:
         raise ValueError("Chave duplicada")
-
     chavePro, offsetPro, filhoDpro, promo = insereNaArvore(chave, pos_offset, pag.filhos[pos])
     if not promo:
         return NULO, NULO, NULO, False
-
-    # Verifica se há espaço disponível na página atual
     if pag.numChaves < ORDEM - 1:
         insereNaPagina(chavePro, offsetPro, filhoDpro, pag)
         escrevePagina(rrnAtual, pag)
         return NULO, NULO, NULO, False
     else:
-        # Se não houver espaço, faz a divisão da página
         chavePro, offsetPro, filhoDpro, pag, novapag = divide(chavePro, offsetPro, filhoDpro, pag)
         escrevePagina(rrnAtual, pag)
         escrevePagina(filhoDpro, novapag)
         return chavePro, offsetPro, filhoDpro, True
 
+
 def gerenciadorDeInsercao(raiz: int, chave: int, pos_offset: int) -> tuple:
-    """Gerencia a inserção e lida com a promoção que cria uma nova raiz."""
+    """Coordena a inserção e cria uma nova raiz quando a promoção alcança o topo."""
     try:
         chavePro, offsetPro, filhoDpro, promocao = insereNaArvore(chave, pos_offset, raiz)
         if promocao:
@@ -213,7 +198,6 @@ def gerenciadorDeInsercao(raiz: int, chave: int, pos_offset: int) -> tuple:
             pNova.filhos[0] = raiz
             pNova.filhos[1] = filhoDpro
             pNova.numChaves = 1
-
             nova_raiz_rrn = novo_rrn()
             escrevePagina(nova_raiz_rrn, pNova)
             raiz = nova_raiz_rrn
@@ -222,7 +206,9 @@ def gerenciadorDeInsercao(raiz: int, chave: int, pos_offset: int) -> tuple:
     except ValueError:
         return raiz, False
 
-# LEITURA DE REGISTROS DO ARQUIVO GAMES.DAT
+
+# Acesso direto ao arquivo de registros
+
 def ler_registro_games(offset: int) -> tuple:
     """Acessa diretamente o arquivo games.dat via byte-offset e lê o registro."""
     if not os.path.exists("games.dat"):
@@ -232,28 +218,26 @@ def ler_registro_games(offset: int) -> tuple:
         len_bytes = fg.read(2)
         if len(len_bytes) < 2:
             return None, 0
-            
-        # Detecta a ordem dos bytes
+
+        # Aceita o indicador de tamanho nas duas ordens de bytes previstas.
         size = int.from_bytes(len_bytes, byteorder="little")
         if size > 2000 or size <= 0:
             size = int.from_bytes(len_bytes, byteorder="big")
-            
         record_bytes = fg.read(size)
         record_str = record_bytes.decode("utf-8", errors="ignore").strip()
         return record_str, size
 
-# MODOS DE OPERAÇÃO DO PROGRAMA
+
+# Modos de execução
+
 def modo_criacao():
     """Cria a árvore-B do zero a partir do games.dat (Opção -b)."""
     if not os.path.exists("games.dat"):
         print("Erro: Arquivo 'games.dat' obrigatorio nao encontrado.")
         sys.exit(1)
-
-    # Sobrescreve/Reseta o arquivo btree.dat se ele existir
     atualiza_raiz_cabecalho(0)
     p_vazia = Pagina()
     escrevePagina(0, p_vazia)
-
     raiz = 0
     with open("games.dat", "rb") as fg:
         while True:
@@ -261,23 +245,21 @@ def modo_criacao():
             len_bytes = fg.read(2)
             if not len_bytes or len(len_bytes) < 2:
                 break
-                
             size = int.from_bytes(len_bytes, byteorder="little")
             if size > 2000 or size <= 0:
                 size = int.from_bytes(len_bytes, byteorder="big")
-                
             dados_registro = fg.read(size)
             string_registro = dados_registro.decode("utf-8", errors="ignore")
             if not string_registro:
                 break
-                
-            # Extrai a chave primária (ID do jogo)
             partes = string_registro.split("|")
+
+            # A primeira posição do registro contém a chave primária numérica.
             if len(partes) > 0 and partes[0].strip().isdigit():
                 game_id = int(partes[0].strip())
                 raiz, sucesso = gerenciadorDeInsercao(raiz, game_id, offset_atual)
-
     print("O indice (Arvore-B) foi criado com sucesso!")
+
 
 def modo_execucao(nome_arq_ops: str):
     """Executa um arquivo sequencial de operações de busca e inserção (Opção -e)."""
@@ -287,26 +269,19 @@ def modo_execucao(nome_arq_ops: str):
     if not os.path.exists(nome_arq_ops):
         print(f"Erro: Arquivo de operacoes '{nome_arq_ops}' nao encontrado.")
         sys.exit(1)
-
     with open(nome_arq_ops, "r", encoding="utf-8", errors="ignore") as fops:
         linhas = fops.readlines()
-
     raiz = le_raiz_cabecalho()
-
     for linha in linhas:
         linha = linha.strip()
         if not linha:
             continue
-            
         op_tipo = linha[0]
         argumento = linha[2:].strip()
-
         if op_tipo == "b":
-            # Operação de Busca
             chave_busca = int(argumento)
             print(f"Busca pelo registro de chave \"{chave_busca}\"")
             achou, rrn_encontrado, pos_encontrada = buscaNaArvore(chave_busca, raiz)
-            
             if achou:
                 pag = lePagina(rrn_encontrado)
                 offset_game = pag.offsets[pos_encontrada]
@@ -314,57 +289,46 @@ def modo_execucao(nome_arq_ops: str):
                 print(f"{rec_str} ({rec_size} bytes offset {offset_game})")
             else:
                 print(f"Erro: chave \"{chave_busca}\" não encontrada")
-
         elif op_tipo == "i":
-            # Operação de Inserção
-            # Identifica o ID do jogo a partir do argumento, que pode ser separado por "|" ou espaço
             if "|" in argumento:
                 game_id = int(argumento.split("|")[0].strip())
             else:
                 game_id = int(argumento.split()[0].strip())
-                
             print(f"Inserção do registro de chave \"{game_id}\"")
-            
-            # Controle de duplicatas obrigatório antes de seguir com a inserção
             achou, _, _ = buscaNaArvore(game_id, raiz)
             if achou:
                 print(f"Erro: chave \"{game_id}\" duplicada")
             else:
-                # Grava o novo registro no final do arquivo games.dat
+
+                # O registro é acrescentado ao fim de games.dat antes da indexação.
                 with open("games.dat", "a+b") as fg:
                     fg.seek(0, os.SEEK_END)
                     novo_offset = fg.tell()
                     bytes_registro = argumento.encode("utf-8")
                     tamanho_reg = len(bytes_registro)
-                    
-                    # Escreve o indicador de tamanho de 2 bytes e depois a string
                     fg.write(tamanho_reg.to_bytes(2, byteorder="little"))
                     fg.write(bytes_registro)
-                
-                # Sincroniza a inserção na Árvore-B
+
+                # A Árvore-B associa a chave ao byte-offset recém-calculado.
                 raiz, sucesso = gerenciadorDeInsercao(raiz, game_id, novo_offset)
                 print(f"{argumento} ({tamanho_reg} bytes offset {novo_offset})")
-
     print(f"As operacoes do arquivo \"{nome_arq_ops}\" foram executadas com sucesso!")
+
 
 def modo_impressao():
     """Apresenta na tela os dados internos de todas as páginas ordenadas por RRN (Opção -p)."""
     if not os.path.exists("btree.dat"):
         print("Erro: Arquivo 'btree.dat' nao existe.")
         sys.exit(1)
-
     raiz = le_raiz_cabecalho()
     total_paginas = novo_rrn()
-
     if total_paginas == 0 and raiz == NULO:
         print("Arvore-B vazia.")
         return
-
     for rrn in range(total_paginas):
         pag = lePagina(rrn)
         if pag is None:
             continue
-            
         print(f"Pagina {rrn}:")
         print("Chaves = " + " | ".join(str(c) for c in pag.chaves))
         print("Offsets = " + " | ".join(str(o) for o in pag.offsets))
@@ -373,7 +337,9 @@ def modo_impressao():
             print("Raiz")
         print()
 
-# MAIN: execução do programa
+
+# Interface de linha de comando
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Uso incorreto. Utilize as flags:")
@@ -381,9 +347,7 @@ if __name__ == "__main__":
         print("  python programa.py -e nome_arquivo_operacoes")
         print("  python programa.py -p")
         sys.exit(1)
-
     flag = sys.argv[1]
-
     if flag == "-b":
         modo_criacao()
     elif flag == "-e":
