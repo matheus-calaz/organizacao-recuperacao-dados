@@ -101,4 +101,4 @@ O arquivo `btree.dat` é gerado pelo programa e não deve ser versionado.
 
 - Execute a construção da árvore antes de processar o arquivo de operações.
 - O programa utiliza apenas módulos da biblioteca padrão do Python.
-- Atenção: as operações de inserção, remoção e compactação podem modificar o arquivo games.dat. Para preservar os dados originais durante os testes, utilize uma cópia do arquivo.
+- Atenção: as operações de inserção modificam o arquivo games.dat. Para preservar os dados originais durante os testes, utilize uma cópia do arquivo.
